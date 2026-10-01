@@ -1,0 +1,22 @@
+{
+    "name": "AuctionVoiceEngine",
+    "rootNamespace": "AuctionEngine",
+    "references": [
+        "Whisper"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [
+        {
+            "name": "com.whisper.unity",
+            "expression": "",
+            "define": "WHISPER_UNITY"
+        }
+    ],
+    "noEngineReferences": false
+}

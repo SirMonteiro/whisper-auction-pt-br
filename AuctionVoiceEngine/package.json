@@ -1,0 +1,21 @@
+{
+  "name": "com.auction.voiceengine",
+  "version": "1.0.0",
+  "displayName": "Auction Voice Engine for Unity",
+  "description": "High-performance Brazilian Portuguese voice bidding, phonetics, slang synthesis, and whisper.unity integration following SOLID principles.",
+  "unity": "2021.3",
+  "unityRelease": "0f1",
+  "author": {
+    "name": "Auction Voice Team"
+  },
+  "keywords": [
+    "whisper",
+    "speech-recognition",
+    "asr",
+    "auction",
+    "voice",
+    "phonetics",
+    "brazilian-portuguese"
+  ],
+  "dependencies": {}
+}
