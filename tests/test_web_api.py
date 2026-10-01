@@ -14,10 +14,10 @@ class MockTranscriber:
     def __init__(self, transcript: str = "cinquenta reais"):
         self.transcript = transcript
 
-    def transcribe(self, audio_data: np.ndarray, sample_rate: int) -> str:
+    def transcribe(self, audio_data: np.ndarray, sample_rate: int, language: str | None = None) -> str:
         return self.transcript
 
-    def transcribe_bytes(self, audio_bytes: bytes) -> str:
+    def transcribe_bytes(self, audio_bytes: bytes, language: str | None = None) -> str:
         return self.transcript
 
 

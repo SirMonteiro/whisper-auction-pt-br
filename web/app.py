@@ -29,7 +29,8 @@ def create_app(
             return jsonify({"error": "Arquivo de áudio vazio"}), 400
 
         try:
-            raw_text = transcriber.transcribe_bytes(audio_bytes)
+            req_language = request.form.get("language")
+            raw_text = transcriber.transcribe_bytes(audio_bytes, language=req_language)
             bid_result = evaluator.evaluate(raw_text)
 
             print("\n================================")

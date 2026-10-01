@@ -26,9 +26,10 @@ def main():
     parser.add_argument("--port", type=int, default=5000, help="Porta do servidor HTTP (padrão: 5000)")
     parser.add_argument("--host", type=str, default="127.0.0.1", help="Host (ex: 127.0.0.1 ou 0.0.0.0)")
     parser.add_argument("--model", type=str, default="openai/whisper-small", help="Modelo Whisper HuggingFace")
+    parser.add_argument("--language", type=str, default="pt", help="Código de idioma para transcrição Whisper (padrão: pt)")
     cli_args = parser.parse_args()
 
-    transcriber = WhisperTranscriber(model_id=cli_args.model)
+    transcriber = WhisperTranscriber(model_id=cli_args.model, language=cli_args.language)
     evaluator = AuctionBidEvaluator()
     app = create_app(transcriber, evaluator)
 

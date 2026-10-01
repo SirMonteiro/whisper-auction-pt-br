@@ -38,12 +38,14 @@ class WhisperTranscriber(ITranscriber):
     def __init__(
         self,
         model_id: str = DEFAULT_WHISPER_ID,
+        language: str = "pt",
         device: Optional[torch.device] = None,
         prompt: str = DEFAULT_PROMPT,
         min_duration_sec: float = 0.25,
         min_rms_energy: float = 0.003,
     ) -> None:
         self.model_id = model_id
+        self.default_language = language
         self.min_duration_sec = min_duration_sec
         self.min_rms_energy = min_rms_energy
 
@@ -52,7 +54,7 @@ class WhisperTranscriber(ITranscriber):
         else:
             self.device = device
 
-        print(f"Carregando Whisper ({self.model_id}) em {self.device}...")
+        print(f"Carregando Whisper ({self.model_id}) [idioma padrão: '{self.default_language}'] em {self.device}...")
         self.processor = WhisperProcessor.from_pretrained(self.model_id)
 
         dtype = torch.float16 if self.device.type == "cuda" else torch.float32
@@ -65,7 +67,12 @@ class WhisperTranscriber(ITranscriber):
         self.prompt_ids = self.processor.get_prompt_ids(prompt, return_tensors="pt").to(self.device)
         print("✓ Pipeline do Whisper inicializado com sucesso.")
 
-    def transcribe(self, audio_data: np.ndarray, sample_rate: int = TARGET_SR) -> str:
+    def transcribe(
+        self,
+        audio_data: np.ndarray,
+        sample_rate: int = TARGET_SR,
+        language: Optional[str] = None,
+    ) -> str:
         """Transcribes a mono float32 numpy audio array."""
         if audio_data is None or len(audio_data) == 0:
             return ""
@@ -99,10 +106,12 @@ class WhisperTranscriber(ITranscriber):
             return_tensors="pt"
         ).input_features.to(self.device, dtype=self.model.dtype)
 
+        target_lang = language or self.default_language
+
         with torch.no_grad():
             predicted_ids = self.model.generate(
                 inputs,
-                language="pt",
+                language=target_lang,
                 task="transcribe",
                 prompt_ids=self.prompt_ids,
                 temperature=0.0,
@@ -117,7 +126,7 @@ class WhisperTranscriber(ITranscriber):
 
         return raw_text
 
-    def transcribe_bytes(self, audio_bytes: bytes) -> str:
+    def transcribe_bytes(self, audio_bytes: bytes, language: Optional[str] = None) -> str:
         """Decodes WAV bytes and executes transcription."""
         data, orig_sr = sf.read(io.BytesIO(audio_bytes), dtype="float32")
-        return self.transcribe(data, sample_rate=orig_sr)
+        return self.transcribe(data, sample_rate=orig_sr, language=language)

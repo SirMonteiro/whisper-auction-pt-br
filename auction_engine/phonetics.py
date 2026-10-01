@@ -1,9 +1,10 @@
-"""Phonological normalization and acoustic repair rules for Brazilian Portuguese ASR."""
+"""Phonological normalization, pre-compiled regex pipeline, and phonetic alphabet alignment."""
 
 import re
 import unicodedata
-from typing import Dict
+from typing import Dict, List, Tuple
 from .lexicon import IDIOM_MAP
+from .phonetic_matcher import PhoneticMatcher
 
 
 def strip_accents(text: str) -> str:
@@ -12,139 +13,132 @@ def strip_accents(text: str) -> str:
     return "".join(c for c in nfkd if unicodedata.category(c) != "Mn").lower()
 
 
-def repair_whisper_acoustics(text: str) -> str:
-    """Repairs common Whisper acoustic misrecognitions in Brazilian Portuguese."""
-    t = text
+# ---------------------------------------------------------------------------
+# Pre-compiled Regex Pipeline for High Performance and Efficiency
+# ---------------------------------------------------------------------------
 
-    # "Mew-Zom", "mew zom", "miw zom" -> "milzão"
-    t = re.sub(r"\b(?:mew|miw|mil)[-\s]+zom\b", "milzao", t, flags=re.IGNORECASE)
+_RE_HYPHENS = re.compile(r"-")
+_RE_MULT_OPERATORS = re.compile(r"\b(?:vezes|multiplicado\s+por|x)\b", re.IGNORECASE)
+_RE_ADD_OPERATORS = re.compile(r"\b(?:mais|somado\s+a|com\s+mais|e\s+mais)\b", re.IGNORECASE)
+_RE_DECIMAL_COMMAS = re.compile(r"(\d+)[,\.](\d+)")
+_RE_STRIP_SYMBOLS = re.compile(r"[^\w\s\.\+\*]")
+_RE_ISOLATED_DOTS = re.compile(r"(?<!\d)\.|\.(?!\d)")
 
-    # "Muzinho", "muizinho", "miuzinho" -> "milzinho"
-    t = re.sub(r"\b(?:muzinho|muizinho|miuzinho|melzinho)\b", "milzinho", t, flags=re.IGNORECASE)
-    t = re.sub(r"\bmil\s+zinhos?\b", "milzinho", t, flags=re.IGNORECASE)
+# English Number Word Fallbacks (compiled alternation)
+_EN_NUM_MAP: Dict[str, str] = {
+    "zero": "zero", "one": "um", "two": "dois", "three": "tres",
+    "four": "quatro", "five": "cinco", "six": "seis", "seven": "sete",
+    "eight": "oito", "nine": "nove", "ten": "dez", "twenty": "vinte",
+    "fifty": "cinquenta", "hundred": "cem", "thousand": "mil"
+}
+_RE_EN_WORDS = re.compile(r"\b(" + "|".join(_EN_NUM_MAP.keys()) + r")\b", re.IGNORECASE)
 
-    # "Cinco itinhas" -> "cinquentinha"
-    t = re.sub(r"\bcinco\s+itinhas?\b", "cinquentinha", t, flags=re.IGNORECASE)
+# Contracted & Sandhi Numeral Rules (pre-compiled)
+_TENS_HUNDREDS = (
+    r"(?:vinte|trinta|quarenta|cinquenta|sessenta|setenta|oitenta|noventa|"
+    r"cento|duzentos?|duzentas?|trezentos?|trezentas?|quatrocentos?|quatrocentas?|"
+    r"quinhentos?|quinhentas?|seiscentos?|seiscentas?|setecentos?|setecentas?|"
+    r"oitocentos?|oitocentas?|novecentos?|novecentas?)"
+)
+_UNITS_TEENS = (
+    r"(?:um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|"
+    r"dez|onze|doze|treze|quatorze|catorze|quinze|dezesseis|dezessete|dezoito|dezenove|"
+    r"vinte|trinta|quarenta|cinquenta|sessenta|setenta|oitenta|noventa)"
+)
+_RE_SANDHI_NUMERALS = re.compile(rf"\b({_TENS_HUNDREDS})e({_UNITS_TEENS})\b", re.IGNORECASE)
+_RE_HUNDREDS_AND = re.compile(
+    rf"\b(duzent|trezent|quatrocent|quinhent|seiscent|setecent|oitocent|novecent)[ei]({_UNITS_TEENS})\b",
+    re.IGNORECASE,
+)
+_RE_SETE = re.compile(r"\bsei?t[ei](s)?\b", re.IGNORECASE)
+_RE_FILLER_UMA_VEZ = re.compile(r"\b(?:mais\s+)?de\s+uma?\s+vez\b", re.IGNORECASE)
 
-    # "Vindes aí", "vindes", "vinde aí", "vite" -> "vinte"
-    t = re.sub(r"\bvindes(?:\s+ai)?\b", "vinte", t, flags=re.IGNORECASE)
-    t = re.sub(r"\bvinde(?:\s+ai)?\b", "vinte", t, flags=re.IGNORECASE)
-    t = re.sub(r"\bvite\b", "vinte", t, flags=re.IGNORECASE)
+# Fauna article remover
+_RE_FAUNA_ARTICLE = re.compile(
+    r"\buma?\s+(beija\s+flor|tartaruga|garca|arara|mico\s+leao|mico|onca\s+pintada|onca|oncinha|garoupa|peixe|lobo\s+guara|lobo|lobinho)\b",
+    re.IGNORECASE,
+)
 
-    # "Vídeo" misrecognized for "Vinte"
-    # When standalone, e.g. "Vídeo." or "video 20" or "video reais"
-    t = re.sub(r"\bvideo\b", "vinte", t, flags=re.IGNORECASE)
+# Master Compiled Idiom & Bingo Regex (Single Pass DFA)
+_SORTED_IDIOMS = sorted(IDIOM_MAP.keys(), key=len, reverse=True)
+_RE_MASTER_IDIOM = re.compile(
+    r"\b(" + "|".join(re.escape(k) for k in _SORTED_IDIOMS) + r")\b",
+    re.IGNORECASE,
+)
 
-    # "SEM" homophone of "CEM" in Brazilian Portuguese (/sẽj̃/)
-    # If followed by negative words (lance, oferta, nada, dinheiro, grana), keep as negative
-    # Otherwise: standalone "sem", or "sem" followed by units/numbers/currency -> "cem"
-    negative_pattern = r"\bsem\s+(?:lance|oferta|proposta|nada|dinheiro|grana|valor)\b"
-    if not re.search(negative_pattern, t, flags=re.IGNORECASE):
-        # "sem unidades", "sem reais", "sem conto", "sem e cinquenta", "sem mil", etc.
-        t = re.sub(
-            r"\bsem\b(?=\s*(?:unidades?|reais?|real|conto|contos|pila|pilas|prata|pratas|"
-            r"bar[ao]es?|placas?|mil|cento|e\s+\w+|\d+|$))",
-            "cem",
-            t,
-            flags=re.IGNORECASE,
-        )
-        # Standalone "sem" at start/end or isolated
-        t = re.sub(r"^\s*sem\s*$", "cem", t, flags=re.IGNORECASE)
+# Morphological & Sandhi Augmentatives
+_SANDHI_AUGMENTATIVES: List[Tuple[re.Pattern, str]] = [
+    (re.compile(r"\bduz[aei]\s+entao\b", re.IGNORECASE), "duzentao"),
+    (re.compile(r"\bquinz[aei]\s+entao\b", re.IGNORECASE), "quinhentao"),
+    (re.compile(r"\bquatr[oe]\s+entao\b", re.IGNORECASE), "quatrocentao"),
+    (re.compile(r"\btrez[aei]\s+entao\b", re.IGNORECASE), "trezentao"),
+    (re.compile(r"\boit[aeo]\s+entao\b", re.IGNORECASE), "oitocentao"),
+    (re.compile(r"\btu[sz]ent(ao|ola|inho|os)\b", re.IGNORECASE), r"duzent\1"),
+    (re.compile(r"\bsen(s|z)(ao|inho)\b", re.IGNORECASE), r"cemzao"),
+    (re.compile(r"\bcen(s|z)(ao|inho)\b", re.IGNORECASE), r"cemzao"),
+    (re.compile(r"\btresent(ao|os|inho|inhos|ola)\b", re.IGNORECASE), r"trezent\1"),
+    (re.compile(r"\bseissent(os|as|ao)\b", re.IGNORECASE), r"seiscent\1"),
+    (re.compile(r"\btrent(a|ao|inho|ola)\b", re.IGNORECASE), r"trint\1"),
+    (re.compile(r"\bcincoent", re.IGNORECASE), "cinquent"),
+    (re.compile(r"\bquintinho(s)?\b", re.IGNORECASE), "quinhentos"),
+    (re.compile(r"\bvint(im|em)\b", re.IGNORECASE), "vinte"),
+    (re.compile(r"\b(?:meio|meu|mepau)\s+pau\b", re.IGNORECASE), "quinhentos reais"),
+    (re.compile(r"\b(?:meio|meu)\s+barao\b", re.IGNORECASE), "quinhentos reais"),
+]
 
-    return t
+# Colloquial PB Plural Erasure (Apagamento de plural)
+_PLURAL_ERASURE: List[Tuple[re.Pattern, str]] = [
+    (re.compile(r"\b(\d+|dois|tres|quatro|cinco|seis|sete|oito|nove|dez)\s+barao\b", re.IGNORECASE), r"\1 baroes"),
+    (re.compile(r"\b(\d+|duas|tres|quatro|cinco|seis|sete|oito|nove|dez)\s+placa\b", re.IGNORECASE), r"\1 placas"),
+    (re.compile(r"\b(\d+|duas|tres|quatro|cinco|seis|sete|oito|nove|dez)\s+onca\b", re.IGNORECASE), r"\1 oncas"),
+    (re.compile(r"\b(\d+|duas|tres|quatro|cinco|seis|sete|oito|nove|dez)\s+garca\b", re.IGNORECASE), r"\1 garcas"),
+    (re.compile(r"\b(\d+|dois|tres|quatro|cinco|seis|sete|oito|nove|dez)\s+lobo\b", re.IGNORECASE), r"\1 lobos"),
+    (re.compile(r"\b(\d+|dois|tres|quatro|cinco|seis|sete|oito|nove|dez)\s+peixe\b", re.IGNORECASE), r"\1 peixes"),
+]
+
+# Singleton Phonetic Matcher instance
+_PHONETIC_MATCHER = PhoneticMatcher()
 
 
 def phonological_repair(text: str) -> str:
-    """Complete phonetic, lexical and morphological normalization pipeline for auction speech."""
+    """High-performance normalization pipeline combining pre-compiled regexes and phonetic alphabet matching."""
+    if not text:
+        return ""
+
     t = strip_accents(text)
-    t = t.replace("-", " ")
+    t = _RE_HYPHENS.sub(" ", t)
 
-    # Whisper acoustic corrections before stripping/normalizing
-    t = repair_whisper_acoustics(t)
+    # 1. Phonetic Alphabet Resolution (handles homophones like SEM -> CEM, Mew-Zom, Muzinho, etc.)
+    t = _PHONETIC_MATCHER.repair_tokens(t)
 
-    # English number word fallbacks (in case of Whisper English token bleed)
-    en_map: Dict[str, str] = {
-        "zero": "zero", "one": "um", "two": "dois", "three": "tres",
-        "four": "quatro", "five": "cinco", "six": "seis", "seven": "sete",
-        "eight": "oito", "nine": "nove", "ten": "dez", "twenty": "vinte",
-        "fifty": "cinquenta", "hundred": "cem", "thousand": "mil"
-    }
-    for en_word, pt_word in en_map.items():
-        t = re.sub(rf"\b{en_word}\b", pt_word, t)
+    # 2. English number word fallbacks (single pass)
+    t = _RE_EN_WORDS.sub(lambda m: _EN_NUM_MAP[m.group(0).lower()], t)
 
-    # Sandhi & contracted numeral repair: "cincoenta" -> "cinquenta", etc.
-    tens_and_hundreds = (
-        r"(?:vinte|trinta|quarenta|cinquenta|sessenta|setenta|oitenta|noventa|"
-        r"cento|duzentos?|duzentas?|trezentos?|trezentas?|quatrocentos?|quatrocentas?|"
-        r"quinhentos?|quinhentas?|seiscentos?|seiscentas?|setecentos?|setecentas?|"
-        r"oitocentos?|oitocentas?|novecentos?|novecentas?)"
-    )
-    units_and_teens = (
-        r"(?:um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|"
-        r"dez|onze|doze|treze|quatorze|catorze|quinze|dezesseis|dezessete|dezoito|dezenove|"
-        r"vinte|trinta|quarenta|cinquenta|sessenta|setenta|oitenta|noventa)"
-    )
-    t = re.sub(rf"\b({tens_and_hundreds})e({units_and_teens})\b", r"\1 e \2", t)
+    # 3. Contracted numerals & sandhi
+    t = _RE_SANDHI_NUMERALS.sub(r"\1 e \2", t)
+    t = _RE_HUNDREDS_AND.sub(r"\1os e \2", t)
+    t = _RE_SETE.sub("sete", t)
 
-    t = re.sub(
-        rf"\b(duzent|trezent|quatrocent|quinhent|seiscent|setecent|oitocent|novecent)[ei]({units_and_teens})\b",
-        r"\1os e \2",
-        t,
-    )
+    # 4. Arithmetic operators and numbers
+    t = _RE_MULT_OPERATORS.sub(" * ", t)
+    t = _RE_ADD_OPERATORS.sub(" + ", t)
+    t = _RE_DECIMAL_COMMAS.sub(r"\1.\2", t)
 
-    t = re.sub(r"\bsei?t[ei](s)?\b", "sete", t)
-    t = re.sub(r"\b(?:vezes|multiplicado\s+por|x)\b", " * ", t)
-    t = re.sub(r"\b(?:mais|somado\s+a|com\s+mais|e\s+mais)\b", " + ", t)
-    t = re.sub(r"(\d+)[,\.](\d+)", r"\1.\2", t)
+    # 5. Clean punctuation
+    t = _RE_STRIP_SYMBOLS.sub(" ", t)
+    t = _RE_ISOLATED_DOTS.sub(" ", t)
+    t = _RE_FILLER_UMA_VEZ.sub(" ", t)
+    t = _RE_FAUNA_ARTICLE.sub(r"\1", t)
 
-    # Strip symbols except math operators, decimals and alphanumerics
-    t = re.sub(r"[^\w\s\.\+\*]", " ", t)
-    t = re.sub(r"(?<!\d)\.|\.(?!\d)", " ", t)
+    # 6. Master Idiom replacement (Single Pass DFA matching all idioms in O(N))
+    t = _RE_MASTER_IDIOM.sub(lambda m: IDIOM_MAP[m.group(0).lower()], t)
 
-    # Idiom noise reductions
-    t = re.sub(r"\bde\s+uma?\s+vez\b", " ", t)
-    t = re.sub(r"\bmais\s+uma?\s+vez\b", " ", t)
+    # 7. Sândi nasal and colloquial PB augmentatives
+    for pattern, repl in _SANDHI_AUGMENTATIVES:
+        t = pattern.sub(repl, t)
 
-    # Remove article before fauna terms: "uma onça" -> "onça"
-    t = re.sub(
-        r"\buma?\s+(beija\s+flor|tartaruga|garca|arara|mico\s+leao|mico|onca\s+pintada|onca|oncinha|garoupa|peixe|lobo\s+guara|lobo|lobinho)\b",
-        r"\1",
-        t,
-    )
-
-    # Replace cultural idioms and bingo expressions (longest first)
-    for idiom in sorted(IDIOM_MAP.keys(), key=len, reverse=True):
-        t = re.sub(rf"\b{idiom}\b", IDIOM_MAP[idiom], t)
-
-    # Sândi nasal in augmentatives: "duza então" -> "duzentão"
-    t = re.sub(r"\bduz[aei]\s+entao\b", "duzentao", t)
-    t = re.sub(r"\bquinz[aei]\s+entao\b", "quinhentao", t)
-    t = re.sub(r"\bquatr[oe]\s+entao\b", "quatrocentao", t)
-    t = re.sub(r"\btrez[aei]\s+entao\b", "trezentao", t)
-    t = re.sub(r"\boit[aeo]\s+entao\b", "oitocentao", t)
-
-    # Dessonorização sibilante & spelling variations
-    t = re.sub(r"\btu[sz]ent(ao|ola|inho|os)\b", r"duzent\1", t)
-    t = re.sub(r"\bsen(s|z)(ao|inho)\b", r"cemzao", t)
-    t = re.sub(r"\bcen(s|z)(ao|inho)\b", r"cemzao", t)
-    t = re.sub(r"\btresent(ao|os|inho|inhos|ola)\b", r"trezent\1", t)
-    t = re.sub(r"\bseissent(os|as|ao)\b", r"seiscent\1", t)
-    t = re.sub(r"\btrent(a|ao|inho|ola)\b", r"trint\1", t)
-    t = re.sub(r"\bcincoent", "cinquent", t)
-
-    t = re.sub(r"\bquintinho(s)?\b", "quinhentos", t)
-    t = re.sub(r"\bvint(im|em)\b", "vinte", t)
-
-    # Colloquial vowel elision
-    t = re.sub(r"\b(?:meio|meu|mepau)\s+pau\b", "quinhentos reais", t)
-    t = re.sub(r"\b(?:meio|meu)\s+barao\b", "quinhentos reais", t)
-
-    # Plural erasure in colloquial Brazilian Portuguese (apagamento de plural)
-    t = re.sub(r"\b(\d+|dois|tres|quatro|cinco|seis|sete|oito|nove|dez)\s+barao\b", r"\1 baroes", t)
-    t = re.sub(r"\b(\d+|duas|tres|quatro|cinco|seis|sete|oito|nove|dez)\s+placa\b", r"\1 placas", t)
-    t = re.sub(r"\b(\d+|duas|tres|quatro|cinco|seis|sete|oito|nove|dez)\s+onca\b", r"\1 oncas", t)
-    t = re.sub(r"\b(\d+|duas|tres|quatro|cinco|seis|sete|oito|nove|dez)\s+garca\b", r"\1 garcas", t)
-    t = re.sub(r"\b(\d+|dois|tres|quatro|cinco|seis|sete|oito|nove|dez)\s+lobo\b", r"\1 lobos", t)
-    t = re.sub(r"\b(\d+|dois|tres|quatro|cinco|seis|sete|oito|nove|dez)\s+peixe\b", r"\1 peixes", t)
+    # 8. Colloquial PB plural erasure
+    for pattern, repl in _PLURAL_ERASURE:
+        t = pattern.sub(repl, t)
 
     return t
