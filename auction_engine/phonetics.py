@@ -59,6 +59,24 @@ _RE_FAUNA_ARTICLE = re.compile(
     re.IGNORECASE,
 )
 
+# Acoustic misrecognitions and dialectal variants
+_RE_SIXENTA = re.compile(r"\b(?:sixenta|sisenta|seicenta)\b", re.IGNORECASE)
+_RE_NOVEM_MIL = re.compile(r"\bnovem(?=\s+mil\b)", re.IGNORECASE)
+_RE_NOVENTENOVE = re.compile(r"\bnovent[ea]n(?:ove|oi)\b", re.IGNORECASE)
+_RE_NOVECENTENTA = re.compile(r"\bnovecententa\b", re.IGNORECASE)
+_RE_MAS_AS_MAIS = re.compile(
+    r"\bmas(?=\s+(?:mil|\d+|um|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez|onze|doze|vinte|trinta|quarenta|cinquenta|sessenta|setenta|oitenta|noventa|cem|cento|duzentos|quinhentos|reais|conto|pila|bar[ao]es?|placas?|pau))\b",
+    re.IGNORECASE,
+)
+_RE_NOVENTA_EM_NOVE = re.compile(
+    r"\b(vinte|trinta|quarenta|cinquenta|sessenta|setenta|oitenta|noventa)\s+em\s+(um|dois|duas|tres|quatro|cinco|seis|sete|oito|nove)\b",
+    re.IGNORECASE,
+)
+_RE_ENGLISH_AND = re.compile(
+    r"\band\b(?=\s*(?:nove|oito|sete|seis|cinco|quatro|tres|dois|um|noventa|oitenta|setenta|sessenta|cinquenta|quarenta|trinta|vinte|dez|\d+))",
+    re.IGNORECASE,
+)
+
 # Master Compiled Idiom & Bingo Regex (Single Pass DFA)
 _SORTED_IDIOMS = sorted(IDIOM_MAP.keys(), key=len, reverse=True)
 _RE_MASTER_IDIOM = re.compile(
@@ -108,36 +126,47 @@ def phonological_repair(text: str) -> str:
     t = strip_accents(text)
     t = _RE_HYPHENS.sub(" ", t)
 
-    # 1. Phonetic Alphabet Resolution (handles homophones like SEM -> CEM, Mew-Zom, Muzinho, etc.)
-    t = _PHONETIC_MATCHER.repair_tokens(t)
+    # 1. Direct acoustic dialectal misrecognitions (fast compiled regexes)
+    t = _RE_SIXENTA.sub("sessenta", t)
+    t = _RE_NOVEM_MIL.sub("nove", t)
+    t = _RE_NOVENTENOVE.sub("noventa e nove", t)
+    t = _RE_NOVECENTENTA.sub("noventa", t)
+    t = _RE_MAS_AS_MAIS.sub("mais", t)
+    t = _RE_NOVENTA_EM_NOVE.sub(r"\1 e \2", t)
+    t = _RE_ENGLISH_AND.sub("e", t)
 
     # 2. English number word fallbacks (single pass)
     t = _RE_EN_WORDS.sub(lambda m: _EN_NUM_MAP[m.group(0).lower()], t)
 
-    # 3. Contracted numerals & sandhi
+    # 3. Strip singular articles before fauna terms (e.g. "uma tartaruga" -> "tartaruga")
+    t = _RE_FAUNA_ARTICLE.sub(r"\1", t)
+
+    # 4. Master Idiom replacement (Single Pass DFA matching all idioms in O(N))
+    t = _RE_MASTER_IDIOM.sub(lambda m: IDIOM_MAP[m.group(0).lower()], t)
+
+    # 5. Phonetic Alphabet Resolution (handles homophones like SEM -> CEM, Mew-Zom, Muzinho, etc.)
+    t = _PHONETIC_MATCHER.repair_tokens(t)
+
+    # 6. Contracted numerals & sandhi
     t = _RE_SANDHI_NUMERALS.sub(r"\1 e \2", t)
     t = _RE_HUNDREDS_AND.sub(r"\1os e \2", t)
     t = _RE_SETE.sub("sete", t)
 
-    # 4. Arithmetic operators and numbers
+    # 7. Arithmetic operators and numbers
     t = _RE_MULT_OPERATORS.sub(" * ", t)
     t = _RE_ADD_OPERATORS.sub(" + ", t)
     t = _RE_DECIMAL_COMMAS.sub(r"\1.\2", t)
 
-    # 5. Clean punctuation
+    # 8. Clean punctuation
     t = _RE_STRIP_SYMBOLS.sub(" ", t)
     t = _RE_ISOLATED_DOTS.sub(" ", t)
     t = _RE_FILLER_UMA_VEZ.sub(" ", t)
-    t = _RE_FAUNA_ARTICLE.sub(r"\1", t)
 
-    # 6. Master Idiom replacement (Single Pass DFA matching all idioms in O(N))
-    t = _RE_MASTER_IDIOM.sub(lambda m: IDIOM_MAP[m.group(0).lower()], t)
-
-    # 7. Sândi nasal and colloquial PB augmentatives
+    # 8. Sândi nasal and colloquial PB augmentatives
     for pattern, repl in _SANDHI_AUGMENTATIVES:
         t = pattern.sub(repl, t)
 
-    # 8. Colloquial PB plural erasure
+    # 9. Colloquial PB plural erasure
     for pattern, repl in _PLURAL_ERASURE:
         t = pattern.sub(repl, t)
 

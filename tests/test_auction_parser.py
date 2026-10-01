@@ -37,17 +37,32 @@ class TestUserReportedErrors:
     def test_explicit_addition(self, evaluator):
         res = evaluator.evaluate("50 mais 50.")
         assert res.value == 100.0
-        assert res.has_addition
+        assert not res.has_addition  # Two or more numbers summed together -> Add is False
 
-    def test_incoherent_distinct_numbers_without_plus(self, evaluator):
+    def test_single_number_with_mais(self, evaluator):
+        res = evaluator.evaluate("Mais dois")
+        assert res.value == 2.0
+        assert res.has_addition  # Single number with "mais" -> Add is True (incremental bid)
+
+    def test_dois_mais_dois(self, evaluator):
+        res = evaluator.evaluate("Dois mais dois.")
+        assert res.value == 4.0
+        assert not res.has_addition  # Two or more numbers with "mais" -> Add is False
+
+    def test_multiple_mais_chain(self, evaluator):
+        res = evaluator.evaluate("Vinte mais, vinte mais vinte, mais sete.")
+        assert res.value == 67.0
+        assert not res.has_addition
+
+    def test_incoherent_distinct_numbers_picks_last(self, evaluator):
         res = evaluator.evaluate("50, 40, 20.")
-        assert res.value == 0.0
-        assert not res.is_valid
+        assert res.value == 20.0  # Picks last detected number
+        assert not res.has_addition
 
-    def test_ungrammatical_tens_plus_tens(self, evaluator):
+    def test_ungrammatical_tens_plus_tens_picks_last(self, evaluator):
         res = evaluator.evaluate("Trinta e dez.")
-        assert res.value == 0.0
-        assert not res.is_valid
+        assert res.value == 10.0  # Picks last detected number
+        assert not res.has_addition
 
     def test_mew_zom_whisper_error(self, evaluator):
         res = evaluator.evaluate("Mew-Zom.")
@@ -185,3 +200,54 @@ class TestLinguisticsAndDomain:
         res2 = evaluator.evaluate("tô fora")
         assert res2.value == 0.0
         assert res2.action_type == "PASS"
+
+
+class TestNewUserExamples:
+    """Verifies all new test cases reported by the user in the latest session."""
+
+    def test_quadreplico_multiplier(self, evaluator):
+        res = evaluator.evaluate("Quadreplico")
+        assert res.value == 4.0
+        assert res.has_multiplication
+        assert res.action_type == "MULTIPLY_ONLY"
+
+    def test_sixenta_as_sessenta(self, evaluator):
+        res = evaluator.evaluate("Sixenta")
+        assert res.value == 60.0
+
+    def test_meia_duzi_variants(self, evaluator):
+        assert evaluator.evaluate("Meia dúzi").value == 6.0
+        assert evaluator.evaluate("Meia dúzias").value == 6.0
+        assert evaluator.evaluate("Uma dúzia").value == 12.0
+
+    def test_patinhos_variants(self, evaluator):
+        assert evaluator.evaluate("Dois patinhos da lago").value == 22.0
+        assert evaluator.evaluate("Dois patinhos da lagoas").value == 22.0
+        assert evaluator.evaluate("Três patinhos").value == 3.0
+
+    def test_vinte_sete_repetition_picks_last(self, evaluator):
+        res = evaluator.evaluate("Vinte-sete, vinte-se, vint-sate")
+        assert res.value == 27.0
+        assert not res.has_addition
+
+    def test_catorze_oitenta_e_oito_picks_last(self, evaluator):
+        res = evaluator.evaluate("Catorze oitenta e oito")
+        assert res.value == 88.0
+
+    def test_novem_mil_novecentos_noventenove(self, evaluator):
+        res = evaluator.evaluate("Novem mil novecentos e noventenove.")
+        assert res.value == 9999.0
+
+    def test_mas_mil_novecentos_noventa_nove(self, evaluator):
+        res = evaluator.evaluate("Mas mil novecentos e noventa e nove.")
+        assert res.value == 1999.0
+        assert res.has_addition  # Single number with "Mas" (="Mais") -> Add is True
+
+    def test_nove_mil_novecentos_noventenoi(self, evaluator):
+        res = evaluator.evaluate("Nove mil novecentos e noventenói.")
+        assert res.value == 9999.0
+
+    def test_noventa_e_nove_mil_novecentos_noventa_em_nove(self, evaluator):
+        res = evaluator.evaluate("Noventa e nove mil novecentos e noventa em nove.")
+        assert res.value == 99999.0
+

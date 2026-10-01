@@ -374,7 +374,7 @@ class AuctionBidEvaluator:
             multiplier_verb_val = 2.0
         elif re.search(r"\b(?:triplic\w*|tripl\w*)\b", clean_text):
             multiplier_verb_val = 3.0
-        elif re.search(r"\b(?:quadruplic\w*|quadrupl\w*)\b", clean_text):
+        elif re.search(r"\b(?:quadr[ue]plic\w*|quadr[ue]pl\w*)\b", clean_text):
             multiplier_verb_val = 4.0
 
         # Segment by addition operator '+'
@@ -388,7 +388,7 @@ class AuctionBidEvaluator:
         total_numbers = len(all_numbers)
         plus_count = clean_text.count("+")
 
-        # Standalone multiplier (e.g. "Dobro!", "Triplica!")
+        # Standalone multiplier (e.g. "Dobro!", "Triplica!", "Quadreplico!")
         if multiplier_verb_val is not None and total_numbers == 0:
             return BidResult(
                 value=multiplier_verb_val,
@@ -414,43 +414,30 @@ class AuctionBidEvaluator:
                 action_type="NONE",
             )
 
-        # Auction chant / repetition handling:
-        # If multiple numbers were found without '+' connectors:
-        if total_numbers >= 2 and plus_count != (total_numbers - 1):
-            # Check if all numbers are identical (e.g. "cinquenta, cinquenta, cinquenta" -> 50.0)
-            if all(math.isclose(n, all_numbers[0], rel_tol=1e-5) for n in all_numbers):
-                repeated_val = all_numbers[0]
-                if multiplier_verb_val is not None:
-                    repeated_val *= multiplier_verb_val
-                return BidResult(
-                    value=float(repeated_val),
-                    currency=format_brazilian_currency(repeated_val),
-                    has_addition=False,
-                    has_multiplication=multiplier_verb_val is not None,
-                    raw_text=text,
-                    cleaned_text=clean_text,
-                    is_valid=True,
-                    action_type="BID",
-                    numbers_found=all_numbers,
-                )
+        # Auction connector and repetition evaluation:
+        # 1. When "mais" and a single number (e.g. "mais dois"):
+        #    Add = True, value = 2.0 (incremental bid).
+        # 2. When two or more numbers are detected all connected by "mais" (e.g. "dois mais dois"):
+        #    Calculate sum (4.0), and leave Add = False (absolute calculated bid).
+        # 3. When multiple numbers are detected without "mais" connectors between all of them:
+        #    Pick the last detected number! (e.g. "50, 40, 20" -> 20.0, "Vinte-sete, vinte-se, vint-sate" -> 27.0).
+        if total_numbers == 1:
+            result = all_numbers[0]
+            has_addition = (plus_count >= 1)
+        elif total_numbers >= 2:
+            if plus_count == (total_numbers - 1):
+                # Two or more numbers all connected by 'mais': sum and set Add = False
+                result = sum(all_numbers)
+                has_addition = False
             else:
-                # Incoherent or ungrammatical number sequence without '+' (e.g. "50, 40, 20" or "trinta e dez")
-                return BidResult(
-                    value=0.0,
-                    currency=format_brazilian_currency(0.0),
-                    has_addition=False,
-                    has_multiplication=False,
-                    raw_text=text,
-                    cleaned_text=clean_text,
-                    is_valid=False,
-                    action_type="INVALID",
-                    numbers_found=all_numbers,
-                )
+                # Multiple numbers not all connected by '+': pick last detected one
+                result = all_numbers[-1]
+                has_addition = False
+        else:
+            result = 0.0
+            has_addition = False
 
-        has_addition = (total_numbers >= 2) or ((total_numbers == 1) and (plus_count >= 1))
         has_multiplication = (multiplier_verb_val is not None)
-
-        result = sum(all_numbers)
         if multiplier_verb_val is not None and result > 0:
             result *= multiplier_verb_val
 
