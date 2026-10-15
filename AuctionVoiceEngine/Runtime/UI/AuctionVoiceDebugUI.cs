@@ -97,7 +97,7 @@ namespace AuctionEngine.UI
 
         private void HandleTranscriptionStarted()
         {
-            UpdateStatus("⏳ Transcrevendo com Whisper...");
+            UpdateStatus("⏳ Transcrevendo com AI Inference Engine...");
         }
 
         private void HandleTranscriptionCompleted(string transcript)

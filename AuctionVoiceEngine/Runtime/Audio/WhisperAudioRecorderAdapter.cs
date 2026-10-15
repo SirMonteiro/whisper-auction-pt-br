@@ -7,9 +7,10 @@ using Whisper.Utils;
 namespace AuctionEngine.Audio
 {
     /// <summary>
-    /// Adapts whisper.unity's MicrophoneRecord component into the IAudioInputProvider interface.
-    /// Can be attached to any GameObject alongside MicrophoneRecord.
+    /// Legacy adapter for whisper.unity's MicrophoneRecord component.
+    /// In modern setups, prefer using <see cref="UnityAudioRecorder"/> which does not require third-party packages.
     /// </summary>
+    [Obsolete("Use UnityAudioRecorder instead for native Unity audio capture.")]
     public sealed class WhisperAudioRecorderAdapter : MonoBehaviour, IAudioInputProvider
     {
         public event Action<float[], int, int> OnAudioReady;
@@ -19,16 +20,17 @@ namespace AuctionEngine.Audio
 #if WHISPER_UNITY || UNITY_WHISPER
         [SerializeField] private MicrophoneRecord _microphoneRecord;
 #endif
+        private UnityAudioRecorder _fallbackRecorder;
 
         public bool IsRecording
         {
             get
             {
 #if WHISPER_UNITY || UNITY_WHISPER
-                return _microphoneRecord != null && _microphoneRecord.IsRecording;
-#else
-                return false;
+                if (_microphoneRecord != null)
+                    return _microphoneRecord.IsRecording;
 #endif
+                return _fallbackRecorder != null && _fallbackRecorder.IsRecording;
             }
         }
 
@@ -43,8 +45,19 @@ namespace AuctionEngine.Audio
             if (_microphoneRecord != null)
             {
                 _microphoneRecord.OnRecordStop += HandleWhisperRecordStop;
+                return;
             }
 #endif
+            // Fallback to native recorder if whisper.unity is not present
+            _fallbackRecorder = GetComponent<UnityAudioRecorder>();
+            if (_fallbackRecorder == null)
+            {
+                _fallbackRecorder = gameObject.AddComponent<UnityAudioRecorder>();
+            }
+
+            _fallbackRecorder.OnAudioReady += (s, f, c) => OnAudioReady?.Invoke(s, f, c);
+            _fallbackRecorder.OnRecordingStarted += () => OnRecordingStarted?.Invoke();
+            _fallbackRecorder.OnRecordingStopped += () => OnRecordingStopped?.Invoke();
         }
 
         private void OnDestroy()
@@ -72,29 +85,40 @@ namespace AuctionEngine.Audio
         public void StartRecording()
         {
 #if WHISPER_UNITY || UNITY_WHISPER
-            if (_microphoneRecord != null && !_microphoneRecord.IsRecording)
+            if (_microphoneRecord != null)
             {
-                _microphoneRecord.StartRecord();
-                OnRecordingStarted?.Invoke();
+                if (!_microphoneRecord.IsRecording)
+                {
+                    _microphoneRecord.StartRecord();
+                    OnRecordingStarted?.Invoke();
+                }
+                return;
             }
-#else
-            Debug.LogWarning("[WhisperAudioRecorderAdapter] whisper.unity is not installed or WHISPER_UNITY define is missing.");
 #endif
+            if (_fallbackRecorder != null)
+            {
+                _fallbackRecorder.StartRecording();
+            }
         }
 
         public void StopRecording()
         {
 #if WHISPER_UNITY || UNITY_WHISPER
-            if (_microphoneRecord != null && _microphoneRecord.IsRecording)
+            if (_microphoneRecord != null)
             {
-                _microphoneRecord.StopRecord();
+                if (_microphoneRecord.IsRecording)
+                {
+                    _microphoneRecord.StopRecord();
+                }
+                return;
             }
 #endif
+            if (_fallbackRecorder != null)
+            {
+                _fallbackRecorder.StopRecording();
+            }
         }
 
-        /// <summary>
-        /// Manually injects audio samples (useful for automated testing or feeding prerecorded clips).
-        /// </summary>
         public void FeedManualAudio(float[] samples, int frequency, int channels)
         {
             OnAudioReady?.Invoke(samples, frequency, channels);

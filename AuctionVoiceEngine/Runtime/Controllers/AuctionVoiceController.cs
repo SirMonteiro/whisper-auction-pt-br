@@ -5,35 +5,45 @@ using UnityEngine;
 using AuctionEngine.Audio;
 using AuctionEngine.Core.Models;
 using AuctionEngine.Core.Services;
-using AuctionEngine.Whisper;
+using AuctionEngine.Inference;
 
-#if WHISPER_UNITY || UNITY_WHISPER
-using Whisper;
-using Whisper.Utils;
+#if UNITY_INFERENCE_ENGINE || UNITY_SENTIS
+using Unity.InferenceEngine;
 #endif
 
 namespace AuctionEngine.Controllers
 {
     /// <summary>
-    /// Master controller orchestrating microphone capture, Whisper ASR inference,
+    /// Master controller orchestrating microphone capture, Unity AI Inference Engine ASR,
     /// phonological normalization, and domain auction bid parsing in Unity.
     /// Follows SOLID principles with swappable components and inspectable UnityEvents.
     /// </summary>
     public sealed class AuctionVoiceController : MonoBehaviour
     {
-        [Header("Whisper.unity References")]
-#if WHISPER_UNITY || UNITY_WHISPER
-        [SerializeField] private WhisperManager _whisperManager;
-        [SerializeField] private MicrophoneRecord _microphoneRecord;
+        [Header("Unity AI Inference Engine References")]
+#if UNITY_INFERENCE_ENGINE || UNITY_SENTIS
+        [Tooltip("ONNX model asset for Speech-to-Text inference (Encoder or single end-to-end model).")]
+        [SerializeField] private ModelAsset _modelAsset;
+
+        [Tooltip("Optional Decoder ONNX model asset for 2-stage autoregressive models (e.g. Whisper).")]
+        [SerializeField] private ModelAsset _decoderModelAsset;
+
+        [Tooltip("Hardware execution backend (GPUCompute recommended for desktop/mobile/console).")]
+        [SerializeField] private BackendType _backendType = BackendType.GPUCompute;
 #else
-        [Tooltip("Attach WhisperManager when whisper.unity is in your project.")]
-        [SerializeField] private MonoBehaviour _whisperManager;
-        [Tooltip("Attach MicrophoneRecord when whisper.unity is in your project.")]
-        [SerializeField] private MonoBehaviour _microphoneRecord;
+        [Tooltip("Attach ModelAsset (requires com.unity.inference-engine or com.unity.sentis).")]
+        [SerializeField] private UnityEngine.Object _modelAsset;
+
+        [Tooltip("Optional Decoder ModelAsset.")]
+        [SerializeField] private UnityEngine.Object _decoderModelAsset;
 #endif
 
+        [Header("Audio Capture Provider")]
+        [Tooltip("Component implementing IAudioInputProvider (e.g. UnityAudioRecorder). Auto-created if null.")]
+        [SerializeField] private MonoBehaviour _audioInputProviderComponent;
+
         [Header("Language & Preprocessing")]
-        [Tooltip("Whisper target language code (e.g. 'pt' for Brazilian Portuguese).")]
+        [Tooltip("Target language code (e.g. 'pt' for Brazilian Portuguese).")]
         [SerializeField] private string _language = "pt";
 
         [Tooltip("Minimum audio duration in seconds to trigger inference.")]
@@ -54,6 +64,7 @@ namespace AuctionEngine.Controllers
         public event Action<BidResult> OnBidEvaluated;
         public AuctionVoiceEvents Events => _events;
         public bool IsRecording => _audioInputProvider != null && _audioInputProvider.IsRecording;
+
         public string Language
         {
             get => _language;
@@ -78,6 +89,11 @@ namespace AuctionEngine.Controllers
                 _audioInputProvider.OnRecordingStarted -= HandleRecordingStarted;
                 _audioInputProvider.OnRecordingStopped -= HandleRecordingStopped;
             }
+
+            if (_transcriptionService is IDisposable disposable)
+            {
+                disposable.Dispose();
+            }
         }
 
         /// <summary>
@@ -93,6 +109,11 @@ namespace AuctionEngine.Controllers
                 _audioInputProvider.OnAudioReady -= HandleAudioReady;
                 _audioInputProvider.OnRecordingStarted -= HandleRecordingStarted;
                 _audioInputProvider.OnRecordingStopped -= HandleRecordingStopped;
+            }
+
+            if (_transcriptionService is IDisposable oldDisposable && oldDisposable != transcriptionService)
+            {
+                oldDisposable.Dispose();
             }
 
             _audioInputProvider = audioInputProvider;
@@ -114,45 +135,53 @@ namespace AuctionEngine.Controllers
                 _bidEvaluator = new AuctionBidEvaluator();
             }
 
-#if WHISPER_UNITY || UNITY_WHISPER
-            if (_whisperManager == null)
-            {
-                _whisperManager = FindObjectOfType<WhisperManager>();
-            }
-
-            if (_microphoneRecord == null)
-            {
-                _microphoneRecord = FindObjectOfType<MicrophoneRecord>();
-            }
-
-            if (_transcriptionService == null && _whisperManager != null)
-            {
-                _transcriptionService = new WhisperUnityTranscriptionService(
-                    _whisperManager,
-                    _language,
-                    WhisperPromptBias.DefaultPortuguesePrompt,
-                    _minRmsEnergy,
-                    _minDurationSec
-                );
-            }
-
+            // 1. Audio input provider setup
             if (_audioInputProvider == null)
             {
-                var adapter = GetComponent<WhisperAudioRecorderAdapter>();
-                if (adapter == null && _microphoneRecord != null)
+                if (_audioInputProviderComponent is IAudioInputProvider provider)
                 {
-                    adapter = gameObject.AddComponent<WhisperAudioRecorderAdapter>();
+                    _audioInputProvider = provider;
+                }
+                else
+                {
+                    _audioInputProvider = GetComponent<IAudioInputProvider>();
+                    if (_audioInputProvider == null)
+                    {
+                        var recorder = GetComponent<UnityAudioRecorder>();
+                        if (recorder == null)
+                        {
+                            recorder = gameObject.AddComponent<UnityAudioRecorder>();
+                        }
+                        _audioInputProvider = recorder;
+                    }
                 }
 
-                if (adapter != null)
+                if (_audioInputProvider != null)
                 {
-                    _audioInputProvider = adapter;
                     _audioInputProvider.OnAudioReady += HandleAudioReady;
                     _audioInputProvider.OnRecordingStarted += HandleRecordingStarted;
                     _audioInputProvider.OnRecordingStopped += HandleRecordingStopped;
                 }
             }
+
+            // 2. Transcription service setup
+            if (_transcriptionService == null)
+            {
+#if UNITY_INFERENCE_ENGINE || UNITY_SENTIS
+                if (_modelAsset != null)
+                {
+                    _transcriptionService = new InferenceEngineTranscriptionService(
+                        _modelAsset,
+                        _decoderModelAsset,
+                        _backendType,
+                        _language,
+                        InferenceEnginePromptBias.DefaultPortuguesePrompt,
+                        _minRmsEnergy,
+                        _minDurationSec
+                    );
+                }
 #endif
+            }
         }
 
         #region Public Controls
@@ -214,7 +243,7 @@ namespace AuctionEngine.Controllers
         {
             if (_transcriptionService == null)
             {
-                _events.OnError?.Invoke("Transcription service is not initialized.");
+                _events.OnError?.Invoke("Transcription service is not initialized. Ensure a ModelAsset is assigned or service configured.");
                 return null;
             }
 

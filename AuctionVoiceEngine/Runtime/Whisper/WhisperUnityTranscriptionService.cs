@@ -3,6 +3,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 using AuctionEngine.Audio;
+using AuctionEngine.Inference;
+
 #if WHISPER_UNITY || UNITY_WHISPER
 using Whisper;
 #endif
@@ -10,10 +12,12 @@ using Whisper;
 namespace AuctionEngine.Whisper
 {
     /// <summary>
-    /// Production implementation of ITranscriptionService wrapping Macoron's whisper.unity WhisperManager.
-    /// Handles audio pre-processing (silence gating, mono conversion) and prompt biasing.
+    /// Legacy implementation of ITranscriptionService wrapping Macoron's whisper.unity WhisperManager.
+    /// In modern Unity projects, prefer using <see cref="AuctionEngine.Inference.InferenceEngineTranscriptionService"/>
+    /// which uses the official Unity AI Inference Engine without requiring third-party plugins.
     /// </summary>
-    public sealed class WhisperUnityTranscriptionService : ITranscriptionService
+    [Obsolete("Use AuctionEngine.Inference.InferenceEngineTranscriptionService instead.")]
+    public sealed class WhisperUnityTranscriptionService : AuctionEngine.Inference.ITranscriptionService, AuctionEngine.Whisper.ITranscriptionService
     {
 #if WHISPER_UNITY || UNITY_WHISPER
         private readonly WhisperManager _whisperManager;
@@ -27,13 +31,13 @@ namespace AuctionEngine.Whisper
         public WhisperUnityTranscriptionService(
             WhisperManager whisperManager,
             string defaultLanguage = "pt",
-            string initialPrompt = WhisperPromptBias.DefaultPortuguesePrompt,
-            float minRmsEnergy = WhisperAudioPreprocessor.DefaultMinRmsEnergy,
-            float minDurationSec = WhisperAudioPreprocessor.DefaultMinDurationSec)
+            string initialPrompt = InferenceEnginePromptBias.DefaultPortuguesePrompt,
+            float minRmsEnergy = AudioPreprocessor.DefaultMinRmsEnergy,
+            float minDurationSec = AudioPreprocessor.DefaultMinDurationSec)
         {
             _whisperManager = whisperManager ?? throw new ArgumentNullException(nameof(whisperManager));
             _defaultLanguage = defaultLanguage ?? "pt";
-            _initialPrompt = initialPrompt ?? WhisperPromptBias.DefaultPortuguesePrompt;
+            _initialPrompt = initialPrompt ?? InferenceEnginePromptBias.DefaultPortuguesePrompt;
             _minRmsEnergy = minRmsEnergy;
             _minDurationSec = minDurationSec;
 
@@ -52,12 +56,12 @@ namespace AuctionEngine.Whisper
         public WhisperUnityTranscriptionService(
             object whisperManager = null,
             string defaultLanguage = "pt",
-            string initialPrompt = WhisperPromptBias.DefaultPortuguesePrompt,
-            float minRmsEnergy = WhisperAudioPreprocessor.DefaultMinRmsEnergy,
-            float minDurationSec = WhisperAudioPreprocessor.DefaultMinDurationSec)
+            string initialPrompt = InferenceEnginePromptBias.DefaultPortuguesePrompt,
+            float minRmsEnergy = AudioPreprocessor.DefaultMinRmsEnergy,
+            float minDurationSec = AudioPreprocessor.DefaultMinDurationSec)
         {
             _defaultLanguage = defaultLanguage ?? "pt";
-            _initialPrompt = initialPrompt ?? WhisperPromptBias.DefaultPortuguesePrompt;
+            _initialPrompt = initialPrompt ?? InferenceEnginePromptBias.DefaultPortuguesePrompt;
             _minRmsEnergy = minRmsEnergy;
             _minDurationSec = minDurationSec;
         }
@@ -74,14 +78,14 @@ namespace AuctionEngine.Whisper
                 return string.Empty;
 
             // 1. Audio silence & duration gating
-            if (!WhisperAudioPreprocessor.IsValidSpeechAudio(samples, frequency, channels, _minDurationSec, _minRmsEnergy))
+            if (!AudioPreprocessor.IsValidSpeechAudio(samples, frequency, channels, _minDurationSec, _minRmsEnergy))
             {
                 return string.Empty;
             }
 
             // 2. Downmix multi-channel to mono
             float[] monoSamples = channels > 1
-                ? WhisperAudioPreprocessor.DownmixToMono(samples, channels)
+                ? AudioPreprocessor.DownmixToMono(samples, channels)
                 : samples;
 
             string targetLang = !string.IsNullOrEmpty(language) ? language : _defaultLanguage;
@@ -93,7 +97,6 @@ namespace AuctionEngine.Whisper
                 return string.Empty;
             }
 
-            // Set language and prompt bias
             _whisperManager.language = targetLang;
             _whisperManager.prompt = _initialPrompt;
 

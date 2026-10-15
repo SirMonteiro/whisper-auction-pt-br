@@ -2,7 +2,8 @@
     "name": "AuctionVoiceEngine",
     "rootNamespace": "AuctionEngine",
     "references": [
-        "Whisper"
+        "Unity.InferenceEngine",
+        "Unity.Sentis"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
@@ -12,6 +13,16 @@
     "autoReferenced": true,
     "defineConstraints": [],
     "versionDefines": [
+        {
+            "name": "com.unity.inference-engine",
+            "expression": "",
+            "define": "UNITY_INFERENCE_ENGINE"
+        },
+        {
+            "name": "com.unity.sentis",
+            "expression": "",
+            "define": "UNITY_SENTIS"
+        },
         {
             "name": "com.whisper.unity",
             "expression": "",
