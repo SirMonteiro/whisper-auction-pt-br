@@ -2,7 +2,7 @@
   "name": "com.auction.voiceengine",
   "version": "1.1.0",
   "displayName": "Auction Voice Engine for Unity",
-  "description": "High-performance Brazilian Portuguese voice bidding, phonetics, slang synthesis, and Unity AI Inference Engine (Unity Sentis) integration following SOLID principles.",
+  "description": "High-performance Brazilian Portuguese voice bidding, phonetics, slang synthesis, and Unity AI Inference Engine integration following SOLID principles.",
   "unity": "2022.3",
   "unityRelease": "0f1",
   "author": {
@@ -10,15 +10,15 @@
   },
   "keywords": [
     "inference-engine",
-    "sentis",
     "speech-recognition",
     "asr",
     "onnx",
-    "whisper",
     "auction",
     "voice",
     "phonetics",
     "brazilian-portuguese"
   ],
-  "dependencies": {}
+  "dependencies": {
+    "com.unity.inference-engine": "1.0.0"
+  }
 }

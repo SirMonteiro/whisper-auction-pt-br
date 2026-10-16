@@ -1,6 +1,8 @@
 # Auction Voice Engine for Unity (C# / Unity AI Inference Engine)
 
-Arquitetura em **C#** desenvolvida segundo os princípios **SOLID** para integração com o **Unity AI Inference Engine** (anteriormente Unity Sentis) e motor completo de pré-processamento de áudio, extração de log-mel espectrogramas, decodificação neural, normalização fonética, reparo dialetal e sintaxe aritmética de leilões em jogos Unity.
+Arquitetura em **C#** desenvolvida segundo os princípios **SOLID** para execução do modelo Whisper finetunado em formato **.onnx** utilizando o **Unity AI Inference Engine** (anteriormente Unity Sentis) e motor completo de pré-processamento de áudio, extração de log-mel espectrogramas, decodificação neural, normalização fonética, reparo dialetal e sintaxe aritmética de leilões em jogos Unity.
+
+**100% nativo Unity**: Não requer bibliotecas ou plugins de terceiros além deste pacote e do pacote oficial `com.unity.inference-engine`.
 
 ---
 
@@ -8,10 +10,10 @@ Arquitetura em **C#** desenvolvida segundo os princípios **SOLID** para integra
 
 ```
 AuctionVoiceEngine/
-├── package.json                               # Manifesto UPM (Unity Package Manager)
+├── package.json                               # Manifesto UPM (dependência oficial: com.unity.inference-engine)
 ├── README.md                                  # Documentação técnica e guia de integração
 ├── Runtime/
-│   ├── AuctionVoiceEngine.asmdef              # Assembly Definition modular (vincula com Unity.InferenceEngine)
+│   ├── AuctionVoiceEngine.asmdef              # Assembly Definition modular (referência Unity.InferenceEngine)
 │   ├── Core/
 │   │   ├── Models/
 │   │   │   ├── AuctionActionType.cs           # Enum de intenção semântica (Bid, Pass, MultiplyOnly, etc.)
@@ -33,9 +35,7 @@ AuctionVoiceEngine/
 │   ├── Audio/
 │   │   ├── IAudioInputProvider.cs             # Abstração de fontes de áudio (ISP/DIP)
 │   │   ├── AudioPreprocessor.cs               # Condicionamento de áudio (RMS gating, mono downmix, resampling)
-│   │   ├── UnityAudioRecorder.cs              # Gravador nativo via UnityEngine.Microphone (16kHz mono)
-│   │   ├── WhisperAudioPreprocessor.cs        # Wrapper de compatibilidade legada
-│   │   └── WhisperAudioRecorderAdapter.cs     # Adaptador de compatibilidade legada
+│   │   └── UnityAudioRecorder.cs              # Gravador nativo via UnityEngine.Microphone (16kHz mono)
 │   ├── Inference/
 │   │   ├── ITranscriptionService.cs           # Abstração de motores ASR / Speech-to-Text
 │   │   ├── ILogMelSpectrogramExtractor.cs     # Interface de extração de log-mel espectrograma
@@ -68,8 +68,8 @@ AuctionVoiceEngine/
    - `BrazilianPortuguesePhoneticEncoder`: exclusivo para codificação G2P em Português Brasileiro.
    - `PhonologicalRepairer`: exclusivo para correções dialetais, DFA de expressões e expansão de gírias.
    - `AuctionBidEvaluator`: focado unicamente na semântica de leilão, somas e conectivos aritméticos.
-   - `AudioPreprocessor`: isola gating de silêncio (RMS), conversão mono, resampling e normalização de pico.
-   - `UnityAudioRecorder`: exclusivo para gravação de microfone nativa no Unity sem dependências de terceiros.
+   - `AudioPreprocessor`: isola gating de silêncio (RMS), conversão mono, resampling linear e normalização de pico.
+   - `UnityAudioRecorder`: exclusivo para gravação de microfone nativa no Unity sem dependências externas.
    - `LogMelSpectrogramExtractor`: dedicado à computação matemática de STFT e banco de 80 filtros Mel.
    - `WhisperTokenizer`: focado na gestão de tokens especiais, BPE e vocabulário de texto.
    - `InferenceEngineTranscriptionService`: orquestra workers do Unity AI Inference Engine (`Unity.InferenceEngine`).
@@ -80,7 +80,7 @@ AuctionVoiceEngine/
 
 3. **L - Liskov Substitution Principle (LSP)**:
    - Qualquer implementação de `ITranscriptionService` (ex: `InferenceEngineTranscriptionService` em produção ou um mock assíncrono em testes unitários) pode substituir o motor neural sem quebrar o fluxo.
-   - Qualquer `IAudioInputProvider` (ex: `UnityAudioRecorder`, `WhisperAudioRecorderAdapter`, ou simulação via `FeedManualAudio`) substitui a captura de áudio com paridade.
+   - Qualquer `IAudioInputProvider` (ex: `UnityAudioRecorder` ou simulação via `FeedManualAudio`) substitui a captura de áudio com paridade.
 
 4. **I - Interface Segregation Principle (ISP)**:
    - Interfaces pequenas e coesas em vez de uma interface monolítica: `IAudioInputProvider` gerencia gravação; `ITranscriptionService` gerencia inferência textual; `IAuctionBidEvaluator` avalia regras de negócio.
@@ -92,12 +92,12 @@ AuctionVoiceEngine/
 
 ## 🚀 Como Integrar no seu Projeto Unity
 
-### 1. Adicionar o Unity AI Inference Engine
+### 1. Adicionar o Pacote Oficial Unity AI Inference Engine
 No Unity 2022.3+, abra **Window > Package Manager**, clique no ícone **`+`** e adicione o pacote oficial:
-- **Inference Engine** (`com.unity.inference-engine` ou `com.unity.sentis`).
+- **Inference Engine** (`com.unity.inference-engine`).
 
-### 2. Adicionar o Modelo ONNX
-1. Adicione o arquivo de modelo ONNX (ex: `whisper_tiny.onnx` ou encoder/decoder exportados) na pasta `Assets/` do seu projeto.
+### 2. Adicionar o seu Modelo ONNX Finetunado
+1. Copie o seu arquivo de modelo finetunado `.onnx` (ex: `whisper_pt_finetuned.onnx`) para dentro da pasta `Assets/` do seu projeto Unity.
 2. O Unity o importará automaticamente como um `ModelAsset`.
 
 ### 3. Configurar a Cena
@@ -106,8 +106,8 @@ No Unity 2022.3+, abra **Window > Package Manager**, clique no ícone **`+`** e 
    - **Frequency**: `16000` (padrão otimizado para reconhecimento de fala).
    - **Force Mono**: `true`.
 3. Adicione o componente `AuctionVoiceController`:
-   - Arraste o modelo ONNX para o campo **Model Asset** (e opcionalmente o Decoder para modelos em 2 estágios).
-   - Defina **Backend Type**: `GPUCompute` (aceleração por shaders de computação na GPU) ou `CPU`.
+   - Arraste o seu modelo ONNX importado para o campo **Model Asset** (e opcionalmente o Decoder para modelos em 2 estágios).
+   - Defina **Backend Type**: `GPUCompute` (aceleração na GPU via compute shaders) ou `CPU`.
    - **Language**: `"pt"` (Português Brasileiro padrão).
    - **Min Duration Sec**: `0.25`
    - **Min Rms Energy**: `0.003` (evita alucinações de inferência em silêncio ambiente).

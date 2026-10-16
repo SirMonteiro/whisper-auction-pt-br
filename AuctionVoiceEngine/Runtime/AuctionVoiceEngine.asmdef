@@ -22,11 +22,6 @@
             "name": "com.unity.sentis",
             "expression": "",
             "define": "UNITY_SENTIS"
-        },
-        {
-            "name": "com.whisper.unity",
-            "expression": "",
-            "define": "WHISPER_UNITY"
         }
     ],
     "noEngineReferences": false
